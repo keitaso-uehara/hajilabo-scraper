@@ -3,6 +3,15 @@ import fetch from "node-fetch";
 
 const app = express();
 app.use(express.json());
+app.get("/", (req,res)=>res.json({ ok:true, time:new Date().toISOString() }));
+
+app.get("/debug-routes", (req, res) => {
+  const routes = app._router.stack
+    .filter(r => r.route)
+    .map(r => Object.keys(r.route.methods).map(m => `${m.toUpperCase()} ${r.route.path}`))
+    .flat();
+  res.json(routes);
+});
 app.get("/", (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 
 // （任意）簡易認証：PaperspaceにSCRAPER_SECRETを設定したら有効化される
@@ -49,7 +58,6 @@ app.post("/scrape", async (req, res) => {
 const PORT = process.env.PORT || 80;
 app.listen(PORT, "0.0.0.0", () => console.log(`OK on ${PORT}`));
 
-app.get("/debug-routes", (req, res) => {
   const routes = app._router.stack
     .filter(r => r.route)
     .map(r => {
