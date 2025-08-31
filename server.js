@@ -4,35 +4,7 @@ import fetch from "node-fetch";
 const app = express();
 app.use(express.json());
 
-// ヘルス（GET /）
-app.get("/", (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
-
-// ルート一覧（認証より前）
-app.get("/debug-routes", (req, res) => {
-  try {
-    const stack = app._router?.stack || [];
-    const routes = [];
-    for (const mw of stack) {
-      if (mw.route && mw.route.path) {
-        const methods = Object.keys(mw.route.methods).map(m => m.toUpperCase());
-        for (const m of methods) routes.push(`${m} ${mw.route.path}`);
-      } else if (mw.name === "router" && mw.handle?.stack) {
-        for (const r of mw.handle.stack) {
-          if (r.route) {
-            const methods = Object.keys(r.route.methods).map(m => m.toUpperCase());
-            for (const m of methods) routes.push(`${m} ${r.route.path}`);
-          }
-        }
-      }
-    }
-    res.json(routes);
-  } catch (e) {
-    res.status(500).json({ error: String(e) });
-  }
-});
-
-// （任意）簡易認証：SCRAPER_SECRET があるときだけ有効
-// もし / と /debug-routes を常に開けたいなら、openPaths に入れてね
+// 認証（/ と /debug-routes は公開、それ以外は X-Auth 必須）
 const openPaths = new Set(["/", "/debug-routes"]);
 app.use((req, res, next) => {
   const secret = process.env.SCRAPER_SECRET;
@@ -42,49 +14,93 @@ app.use((req, res, next) => {
   next();
 });
 
-// 本命: スクレイプ
+// ヘルス
+app.get("/", (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
+
+// ルート一覧（任意）
+app.get("/debug-routes", (req, res) => {
+  try {
+    const stack = app._router?.stack || [];
+    const routes = [];
+    for (const mw of stack) {
+      if (mw.route?.path) {
+        for (const m of Object.keys(mw.route.methods)) routes.push(`${m.toUpperCase()} ${mw.route.path}`);
+      }
+    }
+    res.json(routes);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// ========== 本命：複数URLをまとめてスクレイプ ==========
 app.post("/scrape", async (req, res) => {
-  const { urls } = req.body || {};
+  const { urls, onlyMainContent = true } = req.body || {};
   if (!Array.isArray(urls) || urls.length === 0) {
     return res.status(400).json({ error: "urls[] is required" });
   }
+  const token = process.env.FIRECRAWL_API_KEY;
+  if (!token) return res.status(500).json({ error: "FIRECRAWL_API_KEY not set" });
 
   try {
-    const r = await fetch("https://api.firecrawl.dev/v2/extract", {
+    // 1) ジョブ作成
+    const start = await fetch("https://api.firecrawl.dev/v2/batch/scrape", {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY}`
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
       },
       body: JSON.stringify({
         urls,
-        showSources: true,
-        scrapeOptions: { formats: ["markdown", "links"], onlyMainContent: true }
+        formats: ["markdown", "links"],
+        onlyMainContent
       })
     });
 
-    const text = await r.text();
-    let json; try { json = JSON.parse(text); } catch { json = { raw: text }; }
+    const startText = await start.text();
+    if (!start.ok) return res.status(502).json({ step: "start", upstreamStatus: start.status, upstream: startText });
+    let { id } = JSON.parse(startText) || {};
+    if (!id) return res.status(502).json({ step: "start", error: "no job id", upstream: startText });
 
-    if (!r.ok) {
-      return res.status(502).json({ upstreamStatus: r.status, upstream: json });
+    // 2) ポーリング（最大 N 回 / interval ms）
+    const MAX_TRIES = Number(process.env.FIRECRAWL_MAX_TRIES || 20);     // ~40秒想定
+    const INTERVAL_MS = Number(process.env.FIRECRAWL_POLL_MS || 2000);   // 2秒ごと
+    let resp, tries = 0;
+
+    while (tries < MAX_TRIES) {
+      await new Promise(r => setTimeout(r, INTERVAL_MS));
+      const r2 = await fetch(`https://api.firecrawl.dev/v2/batch/scrape/${id}`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      const txt = await r2.text();
+      try { resp = JSON.parse(txt); } catch { resp = { raw: txt }; }
+
+      if (resp?.status === "completed") break;
+      if (resp?.status === "failed") {
+        // 失敗詳細（任意）
+        return res.status(502).json({ step: "poll", status: resp?.status, upstream: resp });
+      }
+      tries++;
     }
 
-    // レスポンス形を正規化して sources[] に揃える
-    let sources = [];
-    if (Array.isArray(json?.data?.sources)) {
-      sources = json.data.sources;
-    } else if (json?.data && (json.data.markdown || json.data.links)) {
-      sources = [{
-        url: json.data.sourceURL || urls[0],
-        markdown: json.data.markdown || "",
-        links: json.data.links || []
-      }];
+    if (!resp || resp?.status !== "completed") {
+      return res.status(504).json({ step: "poll", error: "timeout", last: resp });
     }
+
+    // 3) 正規化：data[] -> sources[]
+    // resp.data = [ { markdown, links, metadata:{ sourceURL, statusCode, error?... } }, ... ]
+    const sources = (resp.data || []).map(d => ({
+      url: d?.metadata?.sourceURL,
+      statusCode: d?.metadata?.statusCode,
+      error: d?.metadata?.error || null,
+      markdown: d?.markdown || "",
+      links: Array.isArray(d?.links) ? d.links : []
+    }));
 
     return res.json({
-      sources,
-      upstreamShape: Array.isArray(json?.data?.sources) ? "multi" : "single"
+      jobId: id,
+      count: sources.length,
+      sources
     });
   } catch (e) {
     return res.status(500).json({ error: String(e) });
