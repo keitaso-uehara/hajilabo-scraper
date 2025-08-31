@@ -7,14 +7,12 @@
   "scripts": {
     "start": "node server.js"
   },
-  "keywords": [],
-  "author": "keitaso",
-  "license": "ISC",
   "dependencies": {
     "express": "^5.1.0",
     "node-fetch": "^3.3.2"
   },
   "engines": {
     "node": ">=20"
-  }
+  },
+  "license": "ISC"
 }

@@ -1,19 +1,16 @@
-# Node.js 20 の軽量イメージをベースにする
 FROM node:20-slim
 
-# 環境変数
 ENV NODE_ENV=production
 WORKDIR /app
 
-# package.json と lock ファイルを先にコピーして依存をインストール
+# 依存だけ先に入れてキャッシュ効かせる
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-# アプリ本体をコピー
+# アプリ本体
 COPY . .
 
-# PORTはPaperspaceが自動で渡してくる
+# PORT は環境から渡される想定（ローカルは3000）
 EXPOSE 3000
 
-# package.json に書いた "start": "node server.js" を呼ぶ
 CMD ["npm", "start"]

@@ -4,6 +4,16 @@ import fetch from "node-fetch";
 const app = express();
 app.use(express.json());
 
+// （任意）簡易認証：PaperspaceにSCRAPER_SECRETを設定したら有効化される
+app.use((req, res, next) => {
+  if (process.env.SCRAPER_SECRET) {
+    if (req.get("X-Auth") !== process.env.SCRAPER_SECRET) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
+  }
+  next();
+});
+
 app.post("/scrape", async (req, res) => {
   const { urls } = req.body || {};
   if (!Array.isArray(urls) || urls.length === 0) {
@@ -19,13 +29,19 @@ app.post("/scrape", async (req, res) => {
       body: JSON.stringify({
         urls,
         showSources: true,
-        scrapeOptions: { formats: ["markdown","links"], onlyMainContent: true }
+        scrapeOptions: { formats: ["markdown", "links"], onlyMainContent: true }
       })
     });
+
     const json = await r.json();
-    res.json({ sources: json?.data?.sources ?? [] });
+    // エラー時はそのまま返して状況把握しやすくする
+    if (!json?.success && json?.error) {
+      return res.status(502).json(json);
+    }
+
+    return res.json({ sources: json?.data?.sources ?? [] });
   } catch (e) {
-    res.status(500).json({ error: String(e) });
+    return res.status(500).json({ error: String(e) });
   }
 });
 
