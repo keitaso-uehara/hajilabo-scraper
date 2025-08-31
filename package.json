@@ -1,17 +1,20 @@
 {
   "name": "hajilabo-scraper",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Firecrawl scraper server for WP auto-posting",
+  "main": "server.js",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js"
   },
   "keywords": [],
-  "author": "",
+  "author": "keitaso",
   "license": "ISC",
   "dependencies": {
     "express": "^5.1.0",
     "node-fetch": "^3.3.2"
   },
-  "type": "module"
+  "engines": {
+    "node": ">=20"
+  }
 }
