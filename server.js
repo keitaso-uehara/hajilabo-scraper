@@ -48,3 +48,15 @@ app.post("/scrape", async (req, res) => {
 
 const PORT = process.env.PORT || 80;
 app.listen(PORT, "0.0.0.0", () => console.log(`OK on ${PORT}`));
+
+app.get("/debug-routes", (req, res) => {
+  const routes = app._router.stack
+    .filter(r => r.route)
+    .map(r => {
+      const methods = Object.keys(r.route.methods)
+        .map(m => m.toUpperCase())
+        .join(",");
+      return `${methods} ${r.route.path}`;
+    });
+  res.json(routes);
+});
