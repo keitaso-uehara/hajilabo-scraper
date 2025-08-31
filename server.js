@@ -55,7 +55,7 @@ app.post("/scrape", async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 80;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () => console.log(`OK on ${PORT}`));
 
   const routes = app._router.stack
