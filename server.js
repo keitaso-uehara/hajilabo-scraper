@@ -8,12 +8,6 @@ app.use(express.json());
 app.get("/", (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 
 // ルート一覧（認証より前）
-app.get("/debug-routes", (req, res) => {
-  const routes = app._router.stack
-    .filter(r => r.route)
-    .flatMap(r => Object.keys(r.route.methods).map(m => `${m.toUpperCase()} ${r.route.path}`));
-  res.json(routes);
-});
 
 // （任意）簡易認証：SCRAPER_SECRET があるときだけ有効
 app.use((req, res, next) => {
@@ -54,3 +48,25 @@ app.post("/scrape", async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () => console.log(`OK on ${PORT}`));
+app.get("/debug-routes", (req, res) => {
+  try {
+    const stack = (app._router?.stack || []);
+    const routes = [];
+    for (const mw of stack) {
+      if (mw.route && mw.route.path) {
+        const methods = Object.keys(mw.route.methods).map(m=>m.toUpperCase());
+        for (const m of methods) routes.push(`${m} ${mw.route.path}`);
+      } else if (mw.name === "router" && mw.handle?.stack) {
+        for (const r of mw.handle.stack) {
+          if (r.route) {
+            const methods = Object.keys(r.route.methods).map(m=>m.toUpperCase());
+            for (const m of methods) routes.push(`${m} ${r.route.path}`);
+          }
+        }
+      }
+    }
+    res.json(routes);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
